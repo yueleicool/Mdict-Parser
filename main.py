@@ -6,14 +6,25 @@ from bs4 import BeautifulSoup
 from mdict_query import IndexBuilder
 
 # 测试
-builder = IndexBuilder('柯林斯高阶双解.mdx')
+""" builder = IndexBuilder('柯林斯高阶双解.mdx')
 
-""" soup = BeautifulSoup(builder.mdx_lookup('beautiful')[0], features="lxml")
+print(len(builder.mdx_lookup('great'))) """
+
+""" soup = BeautifulSoup(builder.mdx_lookup('fuck')[0], features="lxml")
 print(soup.find_all('div', 'vExplain_r')[0].contents) """
 
 
 """ with open('./dicta.html', 'w+') as wp:
     wp.write(builder.mdx_lookup('fuck')[0]) """
+
+
+def generate_soup(word):
+    """产出所查询单词对应的 BeautifulSoup 实例"""
+
+    builder = IndexBuilder('柯林斯高阶双解.mdx')
+    the_word = builder.mdx_lookup(str(word))[0]
+
+    return BeautifulSoup(the_word, features='lxml')
 
 
 class Mdx_to_mongodb():
@@ -26,11 +37,6 @@ class Mdx_to_mongodb():
     def __generate_star(self):
         """生成星级序列"""
         return [('★' * (i+1) + '☆' * (4-i)) for i in range(5)]
-
-    def __generate_soup(self, word):
-        """产出 BeautifulSoup 实例"""
-        return BeautifulSoup(
-            self.__builder.mdx_lookup(str(word))[0], features="lxml")
 
     def __normalize_title_info(self, info):
         """以元组形式输出规范化后的单词头信息"""
@@ -87,80 +93,89 @@ class Mdx_to_mongodb():
 
         return list(map(self.__parse_example_html, li))
 
-    def __generate_word_detail(self, word, _class='collins_content', multi=False):
+    def __generate_word_detail(self, word, soup, _class='collins_content', multi=False):
         """单词详情搜索封装"""
         if multi:
-            return tuple(self.__generate_soup(word).find_all('div', _class))
+            return tuple(soup.find_all('div', _class))
         else:
-            return tuple(self.__generate_soup(word).find_all('div', _class)[0].contents)
+            return tuple(soup.find_all('div', _class)[0].contents)
 
     def __parse_eng_part(self, info):
         """使用正则表达式解析嵌套html"""
         regex = re.compile(r'(?<=>).*?(?=<)')
         return ''.join(regex.findall(info))
 
-    def parse_title_info(self, word):
+    def parse_title_info(self, word, soup):
         """解析单词名与单词星级"""
-        _ = self.__generate_soup(word).find_all('font')
+        _ = soup.find_all('font')
         name, star = self.__normalize_title_info(_)
         star_num = self.__star_parse_dict[star]
 
         return (name, star, star_num)
 
-    def parse_en_tip(self, word):
+    def parse_en_tip(self, word, soup):
         """解析单词总释义"""
-        if len(self.__generate_soup(word).find_all(
+        if len(soup.find_all(
                 'div', 'en_tip')) != 0:
             _ = self.__generate_word_detail(
-                word, _class='collins_content')[0]
+                word, soup, _class='collins_content')[0]
             eng = self.__normalize_main_en_info(_.find_all('p')[0].contents)
             cn = _.find_all('p')[1].string
             return (eng, cn)
         else:
-            return ('', '')
+            return ()
 
-    def parse_collins_en_cn(self, soup):
+    def parse_collins_en_cn(self, word, soup):
         """解析单词用法"""
-        info = self.__generate_soup(word).find_all('div', 'collins_en_cn')
+        try:
+            info = soup.find_all('div', 'collins_en_cn')
 
-        if info[0].find('div', 'en_tip'):
-            # 测试单一
-            captions = list(map(self.__normalize_caption, info[1:]))
-            examples = list(map(self.__normalize_example, info[1:]))
-        else:
-            captions = list(map(self.__normalize_caption, info[0:]))
-            examples = list(map(self.__normalize_example, info[0:]))
+            if info[0].find('div', 'en_tip'):
+                # 测试单一
+                captions = list(map(self.__normalize_caption, info[1:]))
+                examples = list(map(self.__normalize_example, info[1:]))
+            else:
+                captions = list(map(self.__normalize_caption, info[0:]))
+                examples = list(map(self.__normalize_example, info[0:]))
 
-        return [(caption, example) for caption, example in zip(captions, examples)]
+            return tuple([(caption, example) for caption, example in zip(captions, examples)])
+        except IndexError:
+            return ()
 
-    def parse_vExplain_r(self, word):
+    def parse_vExplain_r(self, word, soup):
         """解析单词变体"""
 
         _ = self.__generate_word_detail(
-            word, _class='vExplain_r', multi=True)
+            word, soup, _class='vExplain_r', multi=True)
         _ = self.__normalize_multi_word_type(_)
-        return _
+        return tuple(_)
 
-    def parse_vEn_tip(self, word):
+    def parse_vEn_tip(self, word, soup):
         """解析用法提示"""
-        info = self.__generate_soup(word).find('div', 'vEn_tip').find_all('p')
+        try:
 
-        _ = []
-        for i in info:
-            for k in i.descendants:
-                if type(k) is bs4.element.NavigableString:
-                    _.append(k)
+            info = soup.find(
+                'div', 'vEn_tip').find_all('p')
 
-        return [''.join(_[:-1]), _[-1]]
+            _ = []
+            for i in info:
+                for k in i.descendants:
+                    if type(k) is bs4.element.NavigableString:
+                        _.append(k)
+
+            return tuple([''.join(_[:-1]), _[-1]])
+
+        except AttributeError:
+            return ()
 
     def __repr__(self):
         pass
 
 
 m = Mdx_to_mongodb()
-word = 'beautiful'
-# print('title-info: ', m.parse_title_info(word), '\n')
-# print('en-tip: ', m.parse_en_tip(word), '\n')
-# print('vExplain_r: ', m.parse_vExplain_r(word), '\n')
-# print('collins_en_cn: ', m.parse_collins_en_cn(word), '\n')
-print('parse_vEn_tip', m.parse_vEn_tip(word), '\n')
+word = 'nice'
+print('title-info: ', m.parse_title_info(word, generate_soup(word)), '\n')
+print('en-tip: ', m.parse_en_tip(word, generate_soup(word)), '\n')
+print('vExplain_r: ', m.parse_vExplain_r(word, generate_soup(word)), '\n')
+print('collins_en_cn: ', m.parse_collins_en_cn(word, generate_soup(word)), '\n')
+print('parse_vEn_tip', m.parse_vEn_tip(word, generate_soup(word)), '\n')
